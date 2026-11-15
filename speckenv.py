@@ -6,8 +6,8 @@ import ast
 import os
 import sys
 import warnings
-from collections.abc import MutableMapping
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable, MutableMapping
+from typing import Any, TypeVar
 
 
 T = TypeVar("T")
