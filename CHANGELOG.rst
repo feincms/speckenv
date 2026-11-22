@@ -5,6 +5,9 @@ Change log
 Next version
 ~~~~~~~~~~~~
 
+7.0 (2026-11-22)
+~~~~~~~~~~~~~~~~
+
 - **Backwards incompatible** (a major version): S3 storage URLs configure
   `django-storages <https://django-storages.readthedocs.io/>`__'s
   ``storages.backends.s3.S3Storage`` instead of django-s3-storage, with
