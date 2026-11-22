@@ -211,11 +211,11 @@ def _file_storage_url(url, qs, *, base_dir):
     }
 
 
-def _s3_bucket_name_key_prefix_from_path(path):
+def _s3_bucket_name_location_from_path(path):
     path = _unquote(path.strip("/")).split("/")
     return {
-        "aws_s3_bucket_name": path[0],
-        "aws_s3_key_prefix": "/".join(path[1:]),
+        "bucket_name": path[0],
+        "location": "/".join(path[1:]),
     }
 
 
@@ -226,27 +226,127 @@ def _try_eval(value):
         return value
 
 
+def _s3_client_config(**kwargs):
+    """Checksums only where an operation requires one: botocore 1.36 and
+    later add a CRC32 checksum to every upload, sent chunked, and
+    S3-compatible services which don't know it refuse uploads"""
+    # Only for S3 URLs: speckenv doesn't depend on botocore
+    from botocore.config import Config  # noqa: PLC0415
+
+    return Config(
+        request_checksum_calculation="when_required",
+        response_checksum_validation="when_required",
+        **kwargs,
+    )
+
+
+# django-s3-storage's options (speckenv 6) with a plain counterpart in
+# django-storages; the others are translated in _s3_compat()
+_S3_RENAMED = {
+    "aws_region": "region_name",
+    "aws_access_key_id": "access_key",
+    "aws_secret_access_key": "secret_key",
+    "aws_session_token": "session_token",
+    "aws_s3_bucket_name": "bucket_name",
+    "aws_s3_key_prefix": "location",
+    "aws_s3_endpoint_url": "endpoint_url",
+    "aws_s3_gzip": "gzip",
+    "aws_s3_signature_version": "signature_version",
+    "aws_s3_addressing_style": "addressing_style",
+    "aws_s3_file_overwrite": "file_overwrite",
+    "aws_s3_use_threads": "use_threads",
+}
+_S3_CONFIG = {
+    "aws_s3_connect_timeout": "connect_timeout",
+    "aws_s3_max_pool_connections": "max_pool_connections",
+}
+_S3_COMBINED = {
+    "aws_s3_bucket_auth",
+    "aws_s3_max_age_seconds",
+    "aws_s3_public_url",
+    "aws_s3_reduced_redundancy",
+    "aws_s3_encrypt_key",
+    "aws_s3_kms_encryption_key_id",
+}
+
+
+def _s3_compat(qs):
+    """django-s3-storage's options as django-storages' and the client's
+    config; those without a counterpart raise a ``ValueError``"""
+    unknown = sorted(
+        key
+        for key in qs
+        if key.startswith("aws_")
+        and key not in _S3_RENAMED.keys() | _S3_CONFIG.keys() | _S3_COMBINED
+    )
+    if unknown:
+        raise ValueError(
+            f"S3 storage URLs configure django-storages since speckenv 7, these"
+            f" django-s3-storage options have no counterpart: {unknown}"
+        )
+    options, config, parameters = {}, {}, {}
+    for key, value in qs.items():
+        if key in _S3_RENAMED:
+            options[_S3_RENAMED[key]] = value
+        elif key in _S3_CONFIG:
+            config[_S3_CONFIG[key]] = value
+    public = qs.get("aws_s3_bucket_auth") is False
+    if "aws_s3_bucket_auth" in qs:
+        # Private: presigned URLs; public: plain URLs and a public ACL
+        options["querystring_auth"] = not public
+        if public:
+            options["default_acl"] = "public-read"
+    if "aws_s3_max_age_seconds" in qs:
+        # The presigned URLs' expiry and the files' Cache-Control
+        seconds = qs["aws_s3_max_age_seconds"]
+        options["querystring_expire"] = seconds
+        privacy = "public" if public else "private"
+        parameters["CacheControl"] = f"{privacy}, max-age={seconds}"
+    if url := qs.get("aws_s3_public_url"):
+        public_url = parse.urlparse(url)
+        options["custom_domain"] = (public_url.netloc + public_url.path).rstrip("/")
+        options["url_protocol"] = f"{public_url.scheme or 'https'}:"
+    if qs.get("aws_s3_reduced_redundancy"):
+        parameters["StorageClass"] = "REDUCED_REDUNDANCY"
+    if key := qs.get("aws_s3_encrypt_key"):
+        parameters["ServerSideEncryption"] = key if isinstance(key, str) else "AES256"
+    if key_id := qs.get("aws_s3_kms_encryption_key_id"):
+        parameters["ServerSideEncryption"] = "aws:kms"
+        parameters["SSEKMSKeyId"] = key_id
+    if parameters:
+        options["object_parameters"] = parameters
+    return options, config
+
+
 def _s3_storage_url(url, qs, *, base_dir):
+    qs = {key: _try_eval(value) for key, value in qs.items()}
+    compat, config = _s3_compat(qs)
     parts = _unquote(url.netloc).rsplit("@", 1)[-1].split(".")
     options = {
-        "aws_access_key_id": _unquote(url.username or ""),
-        "aws_secret_access_key": _unquote(url.password or ""),
-        "aws_s3_key_prefix": _unquote(url.path.strip("/")),
+        "access_key": _unquote(url.username or ""),
+        "secret_key": _unquote(url.password or ""),
+        "location": _unquote(url.path.strip("/")),
+        # As with django-s3-storage (speckenv 6); django-storages' default
+        # overwrites files of the same name
+        "file_overwrite": False,
     }
     if parts[-2:] == ["amazonaws", "com"]:
-        options["aws_region"] = parts[-3]
+        options["region_name"] = parts[-3]
         if parts[0] == "s3":
-            options |= _s3_bucket_name_key_prefix_from_path(url.path)
+            options |= _s3_bucket_name_location_from_path(url.path)
         else:
-            options["aws_s3_bucket_name"] = ".".join(parts[:-4])
+            options["bucket_name"] = ".".join(parts[:-4])
     else:
         # Assume another S3 service
-        options["aws_s3_endpoint_url"] = "https://" + ".".join(parts)
-        options |= _s3_bucket_name_key_prefix_from_path(url.path)
+        options["endpoint_url"] = "https://" + ".".join(parts)
+        options |= _s3_bucket_name_location_from_path(url.path)
 
     return {
-        "BACKEND": "django_s3_storage.storage.S3Storage",
-        "OPTIONS": options | {key: _try_eval(value) for key, value in qs.items()},
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": options
+        | compat
+        | {key: value for key, value in qs.items() if not key.startswith("aws_")}
+        | {"client_config": _s3_client_config(**config)},
     }
 
 

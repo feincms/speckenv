@@ -226,3 +226,37 @@ class StorageTest(TestCase):
 
         name = storage.save("hello.txt", ContentFile(b"Hello"))
         self.assertEqual((TMP_DIR / "media" / name).read_bytes(), b"Hello")
+
+    @skipUnless(find_spec("storages"), "django-storages isn't installed")
+    def test_s3(self):
+        """django-storages accepts the options; an upload goes out without
+        the checksum S3-compatible services refuse (stopped before it's
+        sent)"""
+        from django.core.files.base import ContentFile
+        from storages.backends.s3 import S3Storage
+
+        storage = S3Storage(
+            **django_storage_url(
+                "s3://key:secret@objects.example.org/bucket/media/"
+                # Overwriting: saving doesn't ask the bucket first
+                "?querystring_expire=600&file_overwrite=True"
+            )["OPTIONS"]
+        )
+        self.assertEqual(storage.location, "media")
+        self.assertEqual(storage.querystring_expire, 600)
+        client = storage.connection.meta.client
+        sent = []
+
+        class StoppedError(Exception):
+            pass
+
+        def capture(request, **kwargs):
+            sent.append({k.lower(): v for k, v in request.headers.items()})
+            raise StoppedError
+
+        client.meta.events.register("before-send.s3.PutObject", capture)
+        with self.assertRaises(StoppedError):
+            storage.save("hello.txt", ContentFile(b"Hello"))
+        self.assertTrue(sent)
+        self.assertFalse([h for h in sent[0] if h.startswith("x-amz-checksum-")])
+        self.assertNotIn("x-amz-sdk-checksum-algorithm", sent[0])

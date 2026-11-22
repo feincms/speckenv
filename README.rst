@@ -209,6 +209,35 @@ keyword argument to select such a backend, e.g.
     DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="webmaster@localhost")
 
 
+``django_storage_url``
+~~~~~~~~~~~~~~~~~~~~~~
+
+Covers one entry of ``STORAGES``: the file system (``file:`` with a path,
+relative paths resolved against ``base_dir``) or S3 and S3-compatible
+services through `django-storages <https://django-storages.readthedocs.io/>`__
+(``s3://ACCESS_KEY:SECRET_KEY@host/bucket/prefix/``). AWS hosts give the
+region, other hosts become the ``endpoint_url``. Query string parameters
+are django-storages' options, values parsed using ``ast.literal_eval`` where
+possible; django-s3-storage's names (``aws_s3_bucket_auth`` and so on, used
+before speckenv 7) are translated. Files of the same name aren't overwritten
+unless ``?file_overwrite=True``. Uploads only send checksums where an operation requires one:
+botocore 1.36 and later add a CRC32 checksum to every upload, which many
+S3-compatible services refuse.
+
+.. code-block:: python
+
+    from speckenv_django import django_storage_url
+
+    STORAGES = {
+        "default": django_storage_url(
+            env("STORAGE_URL", default="file:./media/"), base_dir=BASE_DIR
+        ),
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        },
+    }
+
+
 Automatically substituting other Django 12factor libraries
 ==========================================================
 

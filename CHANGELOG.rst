@@ -5,6 +5,23 @@ Change log
 Next version
 ~~~~~~~~~~~~
 
+- **Backwards incompatible** (a major version): S3 storage URLs configure
+  `django-storages <https://django-storages.readthedocs.io/>`__'s
+  ``storages.backends.s3.S3Storage`` instead of django-s3-storage, with
+  django-storages' option names (``access_key``, ``secret_key``,
+  ``bucket_name``, ``location``, ``endpoint_url``, ``region_name``, and
+  its names in the query string). django-s3-storage's names (``aws_...``)
+  in the query string keep working, translated (``aws_s3_bucket_auth=False``
+  is ``querystring_auth=False`` with a ``public-read`` ACL,
+  ``aws_s3_max_age_seconds`` the presigned URLs' expiry and the
+  ``Cache-Control``, …); those without a counterpart (``aws_s3_metadata``,
+  the content disposition and language) raise a ``ValueError``. Files of the
+  same name aren't overwritten (``file_overwrite=False``), as before.
+- S3 uploads only send checksums where an operation requires one
+  (``request_checksum_calculation="when_required"``): botocore 1.36 and
+  later add a CRC32 checksum to every upload, sent chunked, which many
+  S3-compatible services refuse with ``InvalidArgument``.
+- Documented ``django_storage_url`` in the README.
 - Dropped support for Python 3.9.
 
 6.5 (2026-10-26)
