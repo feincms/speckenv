@@ -178,12 +178,26 @@ class DjangoS3StorageURLTest(TestCase):
                     "StorageClass": "REDUCED_REDUNDANCY",
                     "ServerSideEncryption": "AES256",
                 },
-                "signature_version": "s3v4",
-                "addressing_style": "path",
                 "file_overwrite": True,
                 "use_threads": False,
             },
         )
+
+    def test_client_config_options(self):
+        # django-storages ignores them as options when it gets a client config
+        config = django_storage_url(
+            "s3://key:secret@objects.example.org/bucket/"
+            "?aws_s3_signature_version=s3&aws_s3_addressing_style=path"
+        )["OPTIONS"]["client_config"]
+        self.assertEqual(config.signature_version, "s3")
+        self.assertEqual(config.s3, {"addressing_style": "path"})
+
+        # SigV4 as with django-s3-storage, botocore presigns with SigV2
+        config = django_storage_url("s3://key:secret@objects.example.org/bucket/")[
+            "OPTIONS"
+        ]["client_config"]
+        self.assertEqual(config.signature_version, "s3v4")
+        self.assertIsNone(config.s3)
 
     def test_files_arent_overwritten_by_default(self):
         # As with django-s3-storage; django-storages' default overwrites

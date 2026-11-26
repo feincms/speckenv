@@ -341,12 +341,20 @@ def _s3_storage_url(url, qs, *, base_dir):
         options["endpoint_url"] = "https://" + ".".join(parts)
         options |= _s3_bucket_name_location_from_path(url.path)
 
+    options |= compat | {
+        key: value for key, value in qs.items() if not key.startswith("aws_")
+    }
+    # django-storages ignores these options when it gets a client config;
+    # SigV4 as with django-s3-storage (speckenv 6), botocore presigns with
+    # SigV2 otherwise
+    config["signature_version"] = options.pop("signature_version", "s3v4")
+    if style := options.pop("addressing_style", None):
+        config["s3"] = {"addressing_style": style}
+    if proxies := options.pop("proxies", None):
+        config["proxies"] = proxies
     return {
         "BACKEND": "storages.backends.s3.S3Storage",
-        "OPTIONS": options
-        | compat
-        | {key: value for key, value in qs.items() if not key.startswith("aws_")}
-        | {"client_config": _s3_client_config(**config)},
+        "OPTIONS": options | {"client_config": _s3_client_config(**config)},
     }
 
 
