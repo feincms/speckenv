@@ -5,6 +5,9 @@ Change log
 Next version
 ~~~~~~~~~~~~
 
+7.1 (2026-11-26)
+~~~~~~~~~~~~~~~~
+
 - Fixed S3 storage URLs presigning with SigV2: django-storages ignores
   ``signature_version``, ``addressing_style`` and ``proxies`` when it gets a
   client config, so they are passed in the client config now. The signature
